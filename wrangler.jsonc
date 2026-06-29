@@ -9,7 +9,8 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "second-brain-db"
+			"database_name": "second-brain-db",
+			"database_id": "5356089c-d3b5-4bad-b6e9-9c6d6f37c6f9"
 		}
 	],
 	// The VECTORIZE binding is intentionally NOT declared here. When a vectorize
@@ -27,12 +28,19 @@
 	},
 	"kv_namespaces": [
 		{
-			"binding": "OAUTH_KV"
+			"binding": "OAUTH_KV",
+			"id": "059bb9314030402c9fa841695ae8f8c0"
 		}
 	],
 	"vars": {
 		"VECTORIZE_GRACE_MS": "300000"
 	},
+	"routes": [
+		{
+			"pattern": "secondbrain.guoyingwei.top",
+			"custom_domain": true
+		}
+	],
 	"secrets": {
 		"required": ["AUTH_TOKEN"]
 	},
