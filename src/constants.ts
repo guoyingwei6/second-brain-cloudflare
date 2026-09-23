@@ -100,10 +100,20 @@ export const INSIGHT_MAX_TOKENS = 300;
 // all — the pass would then silently return nothing. 1200 gives it enough
 // headroom to finish reasoning and still answer.
 export const INSIGHT_PASS_MAX_TOKENS = 1200;
+// Same reasoning-model headroom as INSIGHT_PASS_MAX_TOKENS above: WHEN_LLM_MODEL
+// defaults to the same gpt-oss-120b, which spends tokens on chain-of-thought
+// before it answers, and this pass's JSON answer is tiny either way.
+export const WHEN_PASS_MAX_TOKENS = 1200;
 export const DIGEST_MAX_TOKENS = 400;
 
 export const VECTORIZE_FIX_HINT =
   "run `npx wrangler vectorize create second-brain-vectors --dimensions=384 --metric=cosine`, or grant the build token Vectorize Edit and redeploy";
+
+// Shared by REST and MCP recall so the two never diverge in what they claim:
+// a failed Vectorize call does not establish WHY it failed, so the assertion
+// is neutral and the missing-index diagnosis is offered only as a possibility.
+export const SEMANTIC_UNAVAILABLE_DETAIL =
+  `This is often temporary; if it persists, the Vectorize index may be missing (fix: ${VECTORIZE_FIX_HINT}).`;
 
 // Durable marker written once, by src/recall/search.ts and src/capture/duplicate.ts,
 // the first time this isolate's workspace-filter latch (src/vectorize/scope.ts)

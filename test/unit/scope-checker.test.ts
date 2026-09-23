@@ -1123,11 +1123,29 @@ describe("the checker over the real source tree", () => {
   // total_recalls sum, each splicing scope.clause directly into its WHERE.
   // Exempt/scope-checked/outer-join are again all UNCHANGED.
   //
+  // MOVED queries 103 -> 104 by GET /projects?counts=1 (src/routes/projects.ts):
+  // one statement splicing scope.clause into its WHERE, so it passes on its
+  // merits. Exempt/scope-checked/outer-join are UNCHANGED.
+  //
+  // MOVED queries 104 -> 105 by the project-restricted seed scan in buildGraph
+  // (src/graph/traverse.ts): a CTE over entries plus the edge scan, both splicing
+  // scope.clause, so it passes on its merits. Exempt/scope-checked/outer-join UNCHANGED.
+  //
+  // MOVED queries 105 -> 106 by GET /tags?counts=1 (src/routes/entries.ts): one bounded
+  // scan splicing scope.clause into its WHERE, so it passes on its merits.
+  // Exempt/scope-checked/outer-join UNCHANGED.
+  //
+  // MOVED scope-checked 7 -> 6 by recallEntries' member-first candidate query
+  // (src/recall/search.ts): it now ends `${memberConds.join(" AND ")}${tagScopeSql}`, so
+  // the checker accepts it on its merits (a scope-shaped interpolation in predicate
+  // position) and its scope-checked annotation is no longer spent. A stronger result,
+  // not a weaker one. Queries/exempt/outer-join UNCHANGED.
+  //
   // As the tool printed it:
-  //   ✔ scope check: 103 queries, 53 documented exceptions, 7 scope-checked
+  //   ✔ scope check: 106 queries, 53 documented exceptions, 6 scope-checked
   //     (clause assembled in JS), 1 scope-outer-join (clause governs a column,
   //     not the row set)
-  it("reports exactly 103 queries, 53 exceptions, 7 scope-checked and 1 outer-join", () => {
+  it("reports exactly 106 queries, 53 exceptions, 6 scope-checked and 1 outer-join", () => {
     const run = spawnSync("node", [resolve(ROOT, "scripts/check-scope.mjs")], {
       cwd: ROOT,
       encoding: "utf8",
@@ -1142,7 +1160,18 @@ describe("the checker over the real source tree", () => {
       { queries, exempt, checked, outerJoin },
       "check:scope counts moved. If that was deliberate, say so out loud and " +
         "update this expectation in the same commit.",
-    ).toEqual({ queries: 103, exempt: 53, checked: 7, outerJoin: 1 });
+    // Deliberate: +3 scoped queries for brief v2 Task A (open-loops) — GET
+    // /loops's row SELECT and its COUNT, plus GET /brief's loop-items preview
+    // — and +2 more for Task B (resurface v2)'s new scoped statements in
+    // src/routes/brief.ts: the same-day-stability fetch-by-id, and the
+    // topic-preferred-pool COUNT probe in pickResurface. Deliberate: +1 query
+    // and +1 scope-exempt for src/when/pass.ts's candidate prefilter (a
+    // per-workspace cron slice, same exemption shape as the other nightly
+    // passes). Deliberate: +4 scoped queries for GET /due (overdue rows,
+    // overdue count, upcoming rows, upcoming count). Deliberate: +1 scoped
+    // query for src/push/send.ts's pushDueItems (the due-item SELECT, scoped
+    // to the one workspace it was called for).
+    ).toEqual({ queries: 117, exempt: 54, checked: 6, outerJoin: 1 });
   });
 
   it("is wired into package.json and CI, or nothing runs it", () => {

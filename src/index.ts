@@ -8,7 +8,9 @@ import type { Env } from "./env";
 import { runNightlyCompression } from "./compression/nightly";
 import { runGraphPass } from "./graph/pass";
 import { INTEGRATION_SYNC_CRON, runScheduledIntegrationSync } from "./integrations/mirror";
+import { pushDueItemsAllWorkspaces } from "./push/send";
 import { runStalenessPass } from "./staleness/pass";
+import { runWhenExtractPass } from "./when/pass";
 import { nextWorkspace } from "./runtime/rotation";
 import { recordNightSummary } from "./runtime/night-summary";
 import { runInsightAccrual } from "./insight/candidates";
@@ -60,14 +62,31 @@ export default {
     const job = (name: string, run: Promise<unknown>) =>
       ctx.waitUntil(run.catch((e) => console.error(`${name} failed (non-fatal):`, e)));
 
-    // Two schedules, two budgets (#290). A Worker invocation gets 50 D1 queries and 10 ms
-    // of CPU on the free plan; the maintenance jobs below already spend 30 of those
-    // queries, so the mirror sync gets its own invocation rather than the remainder of
-    // this one. Routing on the cron string is what makes that real — without the branch
-    // both triggers would run everything and the split would cost budget instead of
-    // buying it.
+    // Two schedules, two budgets (#290). The free plan's real subrequest ceiling is
+    // 1,000 D1/KV/Vectorize calls and 50 external fetch()es per invocation, but every
+    // invocation still gets only 10 ms of CPU, and this codebase keeps a much tighter
+    // self-imposed D1 budget (~50 statements) for cost discipline; the maintenance jobs
+    // below already spend 30 of those, so the mirror sync gets its own invocation rather
+    // than the remainder of this one. Routing on the cron string is what makes that
+    // real — without the branch both triggers would run everything and the split would
+    // cost CPU and D1-cost budget instead of buying it.
     if (event.cron === INTEGRATION_SYNC_CRON) {
-      job("integration sync", runScheduledIntegrationSync(env));
+      job("integration sync", (async () => {
+        try {
+          await runScheduledIntegrationSync(env);
+        } catch (e) {
+          console.error("integration sync failed (non-fatal):", e);
+        }
+        // Own try/catch, run after the sync regardless of whether it
+        // succeeded: due items reaching a subscribed device must not depend
+        // on the mirror sync's health, and a slow or failing sync must not
+        // delay notifications past the hour they were due.
+        try {
+          await pushDueItemsAllWorkspaces(env);
+        } catch (e) {
+          console.error("push due items failed (non-fatal):", e);
+        }
+      })());
       return;
     }
 
@@ -144,6 +163,13 @@ export default {
     // always 0 here: the weekly insight pass runs on its own cron trigger
     // (INSIGHT_WEEKLY_CRON / INSIGHT_TEAM_WEEKLY_CRON above) and never inside
     // this invocation.
+    //
+    // The when-extraction pass runs AFTER these three, not alongside them: it
+    // is capped at WHEN_EXTRACT_PER_NIGHT model calls and its own ten-D1-
+    // statement budget, on top of what compression/graph/staleness already
+    // spend, and keeping it sequential and separately caught means a slow or
+    // failing model call cannot delay or hide the other three the way
+    // bundling it into the same Promise.allSettled would.
     job("nightly maintenance", (async () => {
       const [compression, graph, staleness] = await Promise.allSettled([
         runNightlyCompression(env, ctx, slice),
@@ -153,6 +179,22 @@ export default {
       if (compression.status === "rejected") console.error("nightly compression failed (non-fatal):", compression.reason);
       if (graph.status === "rejected") console.error("graph pass failed (non-fatal):", graph.reason);
       if (staleness.status === "rejected") console.error("staleness pass failed (non-fatal):", staleness.reason);
+
+      let whenExtracted = 0;
+      let whenJudged = 0;
+      let whenSkipped = 0;
+      try {
+        const whenResult = await runWhenExtractPass(env, ctx, slice);
+        whenExtracted = whenResult.whenExtracted;
+        whenJudged = whenResult.whenJudged;
+        whenSkipped = whenResult.whenSkipped;
+        // The pass has already rolled its own cursor back when this is
+        // false (Finding 1) — logged here only so a real outage is visible
+        // in the tail, not to retry: retrying is what next night already does.
+        if (!whenResult.ok) console.error("when-extraction pass: batch write failed, cursor not advanced (non-fatal)");
+      } catch (e) {
+        console.error("when-extraction pass failed (non-fatal):", e);
+      }
 
       // No single workspace to attribute the summary to: an empty corpus (nothing
       // ran) or a rotation read failure (the passes fell back to a whole-corpus
@@ -169,6 +211,9 @@ export default {
         linksInferred: graph.status === "fulfilled" ? graph.value.inserted : 0,
         claimsFlagged: staleness.status === "fulfilled" ? staleness.value.flagged : 0,
         insightsProposed: 0,
+        whenExtracted,
+        whenJudged,
+        whenSkipped,
       });
     })());
   },

@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS entries (
   contradiction_losses INTEGER DEFAULT 0,
   workspace_id     TEXT NOT NULL DEFAULT '',     -- owning workspace ('' = legacy owner-private rows pending backfill)
   actor_id         TEXT NOT NULL DEFAULT ''      -- user who wrote it ('' = the owner, pre-team writes)
-  -- Runtime ALTER columns (see src/db/init.ts): updated_at, staleness_checked_at
+  -- Runtime ALTER columns (see src/db/init.ts): updated_at, staleness_checked_at,
+  -- when_at, when_kind, when_source, when_label
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at DESC);
@@ -221,3 +222,40 @@ INSERT INTO maintenance_cursor (id, workspace_id, advanced_at) VALUES (1, '', 0)
 -- Capsule-only index: missing project ids never scan ordinary memories.
 CREATE INDEX IF NOT EXISTS idx_entries_capsule ON entries(workspace_id, id)
 WHERE instr(lower(tags), '"capsule:') > 0;
+
+-- Projects: a thin registry over the reserved project:<slug> tag. Membership stays
+-- tag-shaped on entries; aliases claim existing plain tags, so nothing is backfilled.
+-- Must stay in step with src/db/init.ts.
+CREATE TABLE IF NOT EXISTS projects (
+  id           TEXT NOT NULL,                    -- slug, ^[a-z0-9][a-z0-9_-]{0,63}$
+  workspace_id TEXT NOT NULL,
+  name         TEXT NOT NULL,                    -- display name, <= 120 chars
+  description  TEXT NOT NULL DEFAULT '',         -- <= 1000 chars
+  aliases      TEXT NOT NULL DEFAULT '[]',       -- JSON array of plain tags, max 16
+  status       TEXT NOT NULL DEFAULT 'active',   -- active | archived (validated in app code)
+  created_at   INTEGER NOT NULL,                 -- Unix ms timestamp
+  updated_at   INTEGER,                          -- Unix ms, NULL until first edit
+  PRIMARY KEY (workspace_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id, status);
+
+-- Project-only index: membership scans never walk ordinary memories.
+CREATE INDEX IF NOT EXISTS idx_entries_project ON entries(workspace_id, id)
+WHERE instr(lower(tags), '"project:') > 0;
+
+-- Web Push subscriptions. One row per subscribed browser/device, scoped to
+-- the workspace it was created against. Must stay in step with src/db/init.ts.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id                TEXT PRIMARY KEY,
+  workspace_id      TEXT NOT NULL DEFAULT '',
+  endpoint_hash     TEXT NOT NULL,               -- SHA-256 hex of the subscription endpoint URL
+  subscription_json TEXT NOT NULL,               -- {endpoint, keys:{p256dh, auth}}
+  content_free      INTEGER NOT NULL DEFAULT 0,  -- 1: notify with a fixed title, no entry content
+  created_at        INTEGER NOT NULL,
+  last_ok_at        INTEGER,                     -- Unix ms of the last successful push, NULL until one lands
+  fail_count        INTEGER NOT NULL DEFAULT 0,  -- consecutive send failures; deleted at 5
+  UNIQUE(endpoint_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_workspace ON push_subscriptions(workspace_id);
