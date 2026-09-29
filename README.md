@@ -67,7 +67,9 @@ Second Brain runs as a Cloudflare Worker backed by D1, Vectorize, Workers AI, an
 2. **Organize:** Second Brain classifies it, checks for duplicates and contradictions, creates relationships, and indexes it for semantic search.
 3. **Recall:** Ask in natural language. Second Brain retrieves relevant memories, follows useful connections, and returns source-backed context to the tool you are using.
 
-If Vectorize is unavailable, captures and keyword recall continue working. Your memories remain usable while semantic indexing is restored. Keyword recall works for Japanese, Chinese, and other scripts written without spaces, and for full-width text. The shipped embedding models read English best; the desktop app's Settings can switch a brain to a multilingual reading.
+If Vectorize is unavailable, captures and keyword recall continue working. Your memories remain usable while semantic indexing is restored. The shipped embedding models read English best; the desktop app's Settings can switch a brain to a multilingual reading.
+
+Search now finds the hard things: exact names, ticket numbers, versions, and phrases in any language, even when they sit in old memories, and finding them is dramatically faster and cheaper, staying that way as the brain grows, which keeps the free plan comfortable. It does this with a full-text index that ranks matches by relevance instead of scanning every memory. The upgrade is automatic: new installs use the index immediately, existing brains build it over nightly runs, and no client needs updating.
 
 ### Memory tools
 
@@ -262,7 +264,8 @@ Follow the [Setup Guide](https://github.com/rahilp/second-brain-cloudflare/wiki/
 
 ```bash
 npm run dev      # start the Worker locally
-npm test         # run the test suite
+npm test         # run the test suite (fast: the golden-set eval replays are opt-in)
+npm run test:eval:full   # the full eval (golden-set replays, workerd lock); run by hand before merging a ranking change
 ```
 
 See [Local Development](https://github.com/rahilp/second-brain-cloudflare/wiki/Local-Development) for mixed local/remote Wrangler configuration and sharing a local brain through a tunnel.
